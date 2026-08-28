@@ -1,0 +1,45 @@
+{
+  "nodes": [
+    { "parameters": { "path": "meeting-recording", "responseMode": "responseNode" }, "id": "mn-webhook-01", "name": "Recording Uploaded Webhook", "type": "n8n-nodes-base.webhook", "typeVersion": 2.1, "position": [-560, 0] },
+    { "parameters": { "url": "={{ $json.body.recording_url }}", "options": { "response": { "response": { "responseFormat": "file" } } } }, "id": "mn-download-01", "name": "Download Audio", "type": "n8n-nodes-base.httpRequest", "typeVersion": 4.2, "position": [-320, 0] },
+    {
+      "parameters": {
+        "resource": "audio",
+        "operation": "transcribe",
+        "options": {}
+      },
+      "id": "mn-transcribe-01",
+      "name": "Transcribe (Whisper)",
+      "type": "n8n-nodes-base.openAi",
+      "typeVersion": 1.8,
+      "position": [-80, 0]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $json.text }}",
+        "hasOutputParser": true,
+        "options": { "systemMessage": "Summarize this meeting transcript into: a short summary, key decisions, and a list of action items each with an owner if mentioned." }
+      },
+      "id": "mn-agent-01",
+      "name": "AI Agent: Summarize",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 1.7,
+      "position": [140, 0]
+    },
+    { "parameters": { "model": "gpt-4o-mini" }, "id": "mn-model-01", "name": "OpenAI", "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi", "typeVersion": 1, "position": [100, 160] },
+    { "parameters": { "schemaType": "manual", "inputSchema": "{\"type\":\"object\",\"properties\":{\"summary\":{\"type\":\"string\"},\"decisions\":{\"type\":\"array\",\"items\":{\"type\":\"string\"}},\"action_items\":{\"type\":\"array\",\"items\":{\"type\":\"object\",\"properties\":{\"task\":{\"type\":\"string\"},\"owner\":{\"type\":\"string\"}}}}}}" }, "id": "mn-parser-01", "name": "Structured Output", "type": "@n8n/n8n-nodes-langchain.outputParserStructured", "typeVersion": 1.2, "position": [180, 160] },
+    { "parameters": { "sendTo": "={{ $json.body.attendee_emails }}", "subject": "Meeting Summary & Action Items", "message": "={{ $json.output.summary }}\\n\\nAction items:\\n{{ $json.output.action_items.map(a => '- ' + a.task + ' (' + a.owner + ')').join('\\n') }}" }, "id": "mn-email-01", "name": "Send Summary Email", "type": "n8n-nodes-base.gmail", "typeVersion": 2.1, "position": [360, -60] },
+    { "parameters": { "operation": "append", "sheetName": { "value": "ActionItems", "mode": "list" }, "columns": { "mappingMode": "autoMapInputData" } }, "id": "mn-log-01", "name": "Log Action Items", "type": "n8n-nodes-base.googleSheets", "typeVersion": 4.5, "position": [360, 60] }
+  ],
+  "connections": {
+    "Recording Uploaded Webhook": { "main": [[{ "node": "Download Audio", "type": "main", "index": 0 }]] },
+    "Download Audio": { "main": [[{ "node": "Transcribe (Whisper)", "type": "main", "index": 0 }]] },
+    "Transcribe (Whisper)": { "main": [[{ "node": "AI Agent: Summarize", "type": "main", "index": 0 }]] },
+    "AI Agent: Summarize": { "main": [[{ "node": "Send Summary Email", "type": "main", "index": 0 }, { "node": "Log Action Items", "type": "main", "index": 0 }]] },
+    "OpenAI": { "ai_languageModel": [[{ "node": "AI Agent: Summarize", "type": "ai_languageModel", "index": 0 }]] },
+    "Structured Output": { "ai_outputParser": [[{ "node": "AI Agent: Summarize", "type": "ai_outputParser", "index": 0 }]] }
+  },
+  "pinData": {},
+  "meta": { "templateCredsSetupCompleted": true }
+}

@@ -1,0 +1,140 @@
+{
+  "nodes": [
+    {
+      "parameters": { "path": "instagram-dm", "responseMode": "responseNode" },
+      "id": "ig-webhook-01",
+      "name": "Instagram Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [-560, 0]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true },
+          "conditions": [
+            { "leftValue": "={{ $json.query['hub.mode'] }}", "rightValue": "subscribe", "operator": { "type": "string", "operation": "equals" } }
+          ]
+        }
+      },
+      "id": "ig-isverif-01",
+      "name": "Is Verification Request?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [-320, 0]
+    },
+    {
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "={{ $json.query['hub.challenge'] }}",
+        "options": {}
+      },
+      "id": "ig-challenge-01",
+      "name": "Respond With Challenge",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [-80, -100]
+    },
+    {
+      "parameters": { "respondWith": "text", "responseBody": "EVENT_RECEIVED", "options": {} },
+      "id": "ig-ack-01",
+      "name": "Acknowledge Event",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [-80, 100]
+    },
+    {
+      "parameters": {
+        "jsCode": "const entry = $json.body.entry?.[0];\nconst messaging = entry?.messaging?.[0];\nreturn [{\n  json: {\n    sender_id: messaging?.sender?.id,\n    message_text: messaging?.message?.text,\n    timestamp: messaging?.timestamp\n  }\n}];"
+      },
+      "id": "ig-extract-01",
+      "name": "Extract Message Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [140, 100]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $json.message_text }}",
+        "options": {
+          "systemMessage": "You are the AI assistant for Ascenta, a web development and AI automation agency. Answer customer questions using the get_agency_info tool for real facts about services, pricing, and process. Be concise, friendly, and helpful."
+        }
+      },
+      "id": "ig-agent-01",
+      "name": "AI Agent",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 1.7,
+      "position": [360, 100]
+    },
+    {
+      "parameters": { "model": "openrouter/auto" },
+      "id": "ig-model-01",
+      "name": "OpenRouter Chat Model",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1,
+      "position": [340, 280]
+    },
+    {
+      "parameters": { "sessionKey": "={{ $('Extract Message Data').item.json.sender_id }}" },
+      "id": "ig-memory-01",
+      "name": "Conversation Memory",
+      "type": "@n8n/n8n-nodes-langchain.memoryBufferWindow",
+      "typeVersion": 1.3,
+      "position": [420, 280]
+    },
+    {
+      "parameters": {
+        "url": "={{ $env.SUPABASE_URL }}/rest/v1/agency_info",
+        "sendQuery": true,
+        "queryParameters": { "parameters": [{ "name": "search", "value": "={{ $fromAI('search') }}" }] },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "apikey", "value": "={{ $env.SUPABASE_SERVICE_ROLE_KEY }}" },
+            { "name": "Authorization", "value": "=Bearer {{ $env.SUPABASE_SERVICE_ROLE_KEY }}" }
+          ]
+        },
+        "toolDescription": "Look up real facts about Ascenta: services, pricing, process, and policies."
+      },
+      "id": "ig-tool-01",
+      "name": "get_agency_info",
+      "type": "n8n-nodes-base.httpRequestTool",
+      "typeVersion": 4.2,
+      "position": [500, 280]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://graph.instagram.com/v21.0/me/messages",
+        "sendQuery": true,
+        "queryParameters": { "parameters": [{ "name": "access_token", "value": "={{ $env.INSTAGRAM_PAGE_ACCESS_TOKEN }}" }] },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ recipient: { id: $('Extract Message Data').item.json.sender_id }, message: { text: $json.output } }) }}"
+      },
+      "id": "ig-send-01",
+      "name": "Send Instagram Reply",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [600, 100]
+    }
+  ],
+  "connections": {
+    "Instagram Webhook": { "main": [[{ "node": "Is Verification Request?", "type": "main", "index": 0 }]] },
+    "Is Verification Request?": {
+      "main": [
+        [{ "node": "Respond With Challenge", "type": "main", "index": 0 }],
+        [{ "node": "Acknowledge Event", "type": "main", "index": 0 }]
+      ]
+    },
+    "Acknowledge Event": { "main": [[{ "node": "Extract Message Data", "type": "main", "index": 0 }]] },
+    "Extract Message Data": { "main": [[{ "node": "AI Agent", "type": "main", "index": 0 }]] },
+    "AI Agent": { "main": [[{ "node": "Send Instagram Reply", "type": "main", "index": 0 }]] },
+    "OpenRouter Chat Model": { "ai_languageModel": [[{ "node": "AI Agent", "type": "ai_languageModel", "index": 0 }]] },
+    "Conversation Memory": { "ai_memory": [[{ "node": "AI Agent", "type": "ai_memory", "index": 0 }]] },
+    "get_agency_info": { "ai_tool": [[{ "node": "AI Agent", "type": "ai_tool", "index": 0 }]] }
+  },
+  "pinData": {},
+  "meta": { "templateCredsSetupCompleted": true }
+}

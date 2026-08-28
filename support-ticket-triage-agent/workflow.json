@@ -1,0 +1,53 @@
+{
+  "nodes": [
+    { "parameters": { "pollTimes": { "item": [{ "mode": "everyMinute" }] }, "filters": { "q": "label:support is:unread" } }, "id": "tt-trigger-01", "name": "New Support Email", "type": "n8n-nodes-base.gmailTrigger", "typeVersion": 1.2, "position": [-560, 0] },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $json.text }}",
+        "hasOutputParser": true,
+        "options": { "systemMessage": "Classify this support email: category (Billing, Technical, General), urgency (Low, Medium, High), and sentiment (Positive, Neutral, Negative)." }
+      },
+      "id": "tt-agent-01",
+      "name": "AI Agent: Classify",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 1.7,
+      "position": [-320, 0]
+    },
+    { "parameters": { "model": "gpt-4o-mini" }, "id": "tt-model-01", "name": "OpenAI", "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi", "typeVersion": 1, "position": [-360, 160] },
+    { "parameters": { "schemaType": "manual", "inputSchema": "{\"type\":\"object\",\"properties\":{\"category\":{\"type\":\"string\"},\"urgency\":{\"type\":\"string\"},\"sentiment\":{\"type\":\"string\"}}}" }, "id": "tt-parser-01", "name": "Structured Output", "type": "@n8n/n8n-nodes-langchain.outputParserStructured", "typeVersion": 1.2, "position": [-240, 160] },
+    {
+      "parameters": {
+        "mode": "rules",
+        "rules": {
+          "values": [
+            { "outputKey": "Billing", "conditions": { "conditions": [{ "leftValue": "={{ $json.output.category }}", "rightValue": "Billing", "operator": { "type": "string", "operation": "equals" } }] } },
+            { "outputKey": "Technical", "conditions": { "conditions": [{ "leftValue": "={{ $json.output.category }}", "rightValue": "Technical", "operator": { "type": "string", "operation": "equals" } }] } },
+            { "outputKey": "General", "conditions": { "conditions": [{ "leftValue": "={{ $json.output.category }}", "rightValue": "General", "operator": { "type": "string", "operation": "equals" } }] } }
+          ]
+        }
+      },
+      "id": "tt-switch-01",
+      "name": "Route by Category",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [-80, 0]
+    },
+    { "parameters": { "channel": "billing-support", "text": "=Billing ticket ({{ $json.output.urgency }} urgency): {{ $('New Support Email').item.json.subject }}" }, "id": "tt-billing-01", "name": "Notify Billing Team", "type": "n8n-nodes-base.slack", "typeVersion": 2.3, "position": [140, -120] },
+    { "parameters": { "operation": "append", "sheetName": { "value": "TechnicalTickets", "mode": "list" }, "columns": { "mappingMode": "autoMapInputData" } }, "id": "tt-tech-01", "name": "Log Technical Ticket", "type": "n8n-nodes-base.googleSheets", "typeVersion": 4.5, "position": [140, 0] },
+    { "parameters": { "operation": "reply", "messageId": "={{ $('New Support Email').item.json.id }}", "message": "Thanks for reaching out — an automated draft reply is ready for review." }, "id": "tt-general-01", "name": "Draft Auto-Reply", "type": "n8n-nodes-base.gmail", "typeVersion": 2.1, "position": [140, 120] },
+    { "parameters": { "operation": "addLabels", "messageId": "={{ $('New Support Email').item.json.id }}", "labelIds": ["Triaged"] }, "id": "tt-label-01", "name": "Label as Triaged", "type": "n8n-nodes-base.gmail", "typeVersion": 2.1, "position": [360, 0] }
+  ],
+  "connections": {
+    "New Support Email": { "main": [[{ "node": "AI Agent: Classify", "type": "main", "index": 0 }]] },
+    "AI Agent: Classify": { "main": [[{ "node": "Route by Category", "type": "main", "index": 0 }]] },
+    "OpenAI": { "ai_languageModel": [[{ "node": "AI Agent: Classify", "type": "ai_languageModel", "index": 0 }]] },
+    "Structured Output": { "ai_outputParser": [[{ "node": "AI Agent: Classify", "type": "ai_outputParser", "index": 0 }]] },
+    "Route by Category": { "main": [[{ "node": "Notify Billing Team", "type": "main", "index": 0 }], [{ "node": "Log Technical Ticket", "type": "main", "index": 0 }], [{ "node": "Draft Auto-Reply", "type": "main", "index": 0 }]] },
+    "Notify Billing Team": { "main": [[{ "node": "Label as Triaged", "type": "main", "index": 0 }]] },
+    "Log Technical Ticket": { "main": [[{ "node": "Label as Triaged", "type": "main", "index": 0 }]] },
+    "Draft Auto-Reply": { "main": [[{ "node": "Label as Triaged", "type": "main", "index": 0 }]] }
+  },
+  "pinData": {},
+  "meta": { "templateCredsSetupCompleted": true }
+}

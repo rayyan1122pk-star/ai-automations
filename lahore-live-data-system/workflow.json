@@ -1,0 +1,404 @@
+{
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "triggerAtHour": 3
+            }
+          ]
+        }
+      },
+      "id": "648c56bc-4edb-47ce-9aea-f7430300babb",
+      "name": "Daily 3AM (Facilities/OSM)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [-544, 752]
+    },
+    {
+      "parameters": {
+        "url": "https://api.open-meteo.com/v1/forecast",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            { "name": "latitude", "value": "31.5497" },
+            { "name": "longitude", "value": "74.3436" },
+            { "name": "current", "value": "temperature_2m,relative_humidity_2m,precipitation,rain,weather_code,wind_speed_10m,wind_direction_10m,surface_pressure" },
+            { "name": "hourly", "value": "temperature_2m,precipitation_probability,precipitation" },
+            { "name": "forecast_hours", "value": "12" },
+            { "name": "timezone", "value": "Asia/Karachi" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "0829bd4c-05c8-43eb-817b-4e9a0e5b6fbc",
+      "name": "Open-Meteo: Weather",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-304, 96]
+    },
+    {
+      "parameters": {
+        "url": "https://air-quality-api.open-meteo.com/v1/air-quality",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            { "name": "latitude", "value": "31.5497" },
+            { "name": "longitude", "value": "74.3436" },
+            { "name": "current", "value": "pm10,pm2_5,carbon_monoxide,nitrogen_dioxide,sulphur_dioxide,ozone,us_aqi,european_aqi" },
+            { "name": "hourly", "value": "pm2_5,us_aqi" },
+            { "name": "forecast_hours", "value": "6" },
+            { "name": "timezone", "value": "Asia/Karachi" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "53a13965-1fac-4e33-bd25-3b03eddf5d28",
+      "name": "Open-Meteo: Air Quality",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-304, 272]
+    },
+    {
+      "parameters": {
+        "url": "https://api.openaq.org/v3/locations",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            { "name": "coordinates", "value": "31.5497,74.3436" },
+            { "name": "radius", "value": "25000" },
+            { "name": "limit", "value": "20" }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "X-API-Key", "value": "={{ $env.OPENAQ_API_KEY }}" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "70cde38b-d3a9-40d6-b038-095dc61a4348",
+      "name": "OpenAQ: Lahore Stations",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-304, 464],
+      "notes": "Requires a free API key from explore.openaq.org, provided via the OPENAQ_API_KEY environment variable (never hardcode the key)."
+    },
+    {
+      "parameters": {
+        "jsCode": "// Simple threshold-based alert detection\nconst d = $input.first().json;\nconst alerts = [];\n\nif (d.air_quality.us_aqi >= 151) {\n  alerts.push({ type: 'AIR_QUALITY', level: d.air_quality.us_aqi >= 201 ? 'SEVERE' : 'HIGH', message: `US AQI ${d.air_quality.us_aqi} - unhealthy air quality in Lahore` });\n}\nif (d.weather.rain_mm >= 15) {\n  alerts.push({ type: 'FLOOD_RISK', level: d.weather.rain_mm >= 30 ? 'SEVERE' : 'MODERATE', message: `Heavy rainfall detected: ${d.weather.rain_mm}mm - elevated flood risk in low-lying areas` });\n}\nif (d.weather.temperature_c >= 42) {\n  alerts.push({ type: 'HEAT', level: d.weather.temperature_c >= 45 ? 'SEVERE' : 'HIGH', message: `Extreme heat: ${d.weather.temperature_c}°C` });\n}\n\nd.alerts = alerts;\nreturn [{ json: d }];"
+      },
+      "id": "c6f59918-4ff4-42a4-bf48-3174b392628d",
+      "name": "Detect Alerts",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [160, 272]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://overpass-api.de/api/interpreter",
+        "sendBody": true,
+        "bodyParameters": { "parameters": [{}] },
+        "options": {}
+      },
+      "id": "8745c8ba-184f-4088-82ad-eb98e1a427d6",
+      "name": "Overpass: OSM Facilities",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-304, 752]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Normalize OSM elements into a flat facility list grouped by category\nconst raw = $input.first().json;\nconst elements = raw.elements || [];\n\nfunction categorize(tags) {\n  if (tags.amenity === 'hospital') return 'hospital';\n  if (tags.amenity === 'school') return 'school';\n  if (tags.amenity === 'police') return 'police';\n  if (tags.leisure === 'park') return 'park';\n  return 'other';\n}\n\nconst facilities = elements.map(el => {\n  const lat = el.lat ?? el.center?.lat;\n  const lon = el.lon ?? el.center?.lon;\n  return {\n    id: el.id,\n    type: categorize(el.tags || {}),\n    name: el.tags?.name || 'Unnamed',\n    lat,\n    lon\n  };\n}).filter(f => f.lat && f.lon);\n\nreturn [{\n  json: {\n    city: 'Lahore',\n    ingested_at: new Date().toISOString(),\n    facility_count: facilities.length,\n    facilities\n  }\n}];"
+      },
+      "id": "c0690709-62e9-4afa-806c-7e28f1c2ea3d",
+      "name": "Normalize OSM Facilities",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-64, 752]
+    },
+    {
+      "parameters": {
+        "path": "lahore-live",
+        "responseMode": "responseNode",
+        "options": { "allowedOrigins": "*" }
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [-560, -256],
+      "id": "a8c91d67-a6b6-4f52-9ae5-51a0ff617435",
+      "name": "Webhook",
+      "webhookId": "f64c6d88-bfff-46f7-9975-e17b826893cc"
+    },
+    {
+      "parameters": { "options": {} },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [-64, -240],
+      "id": "5b7cbfe9-f06c-40b6-a948-baaf02c9d133",
+      "name": "Respond to Webhook"
+    },
+    {
+      "parameters": {
+        "url": "https://api.open-meteo.com/v1/forecast",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            { "name": "latitude", "value": "31.5497" },
+            { "name": "longitude", "value": "74.3436" },
+            { "name": "current", "value": "temperature_2m,relative_humidity_2m,precipitation,rain,weather_code,wind_speed_10m,wind_direction_10m,surface_pressure" },
+            { "name": "hourly", "value": "temperature_2m,precipitation_probability,precipitation" },
+            { "name": "forecast_hours", "value": "12" },
+            { "name": "timezone", "value": "Asia/Karachi" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "wh-weather-01",
+      "name": "Webhook - Weather",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-784, -496]
+    },
+    {
+      "parameters": {
+        "url": "https://air-quality-api.open-meteo.com/v1/air-quality",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            { "name": "latitude", "value": "31.5497" },
+            { "name": "longitude", "value": "74.3436" },
+            { "name": "current", "value": "pm10,pm2_5,carbon_monoxide,nitrogen_dioxide,sulphur_dioxide,ozone,us_aqi,european_aqi" },
+            { "name": "hourly", "value": "pm2_5,us_aqi" },
+            { "name": "forecast_hours", "value": "6" },
+            { "name": "timezone", "value": "Asia/Karachi" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "wh-aq-01",
+      "name": "Webhook - Air Quality",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-528, -496]
+    },
+    {
+      "parameters": {
+        "url": "https://api.openaq.org/v3/locations",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            { "name": "coordinates", "value": "31.5497,74.3436" },
+            { "name": "radius", "value": "25000" },
+            { "name": "limit", "value": "20" }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "X-API-Key", "value": "={{ $env.OPENAQ_API_KEY }}" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "wh-openaq-01",
+      "name": "Webhook - OpenAQ",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-272, -496]
+    },
+    {
+      "parameters": {
+        "jsCode": "function safeGet(nodeName) { try { const item = $(nodeName).first(); return item ? item.json : null; } catch (e) { return null; } }\nconst weather = safeGet('Webhook - Weather') || {};\nconst airQuality = safeGet('Webhook - Air Quality') || {};\nconst openaq = safeGet('Webhook - OpenAQ');\nconst forex = safeGet('Webhook - Forex') || {};\nconst kse = safeGet('Webhook - PSX Stocks');\nconst kmi = safeGet('Webhook - PSX KMI30');\nconst goldRaw = safeGet('Webhook - Gold');\nconst flightsRaw = safeGet('Webhook - Flights');\nconst tavily = safeGet('Webhook - Tavily Civic');\n\nconst rates = forex.rates || {};\nconst usdToPkr = rates.PKR || null;\nconst usdToSar = rates.SAR || null;\nconst usdToAed = rates.AED || null;\nconst sarToPkr = (usdToPkr && usdToSar) ? usdToPkr / usdToSar : null;\nconst aedToPkr = (usdToPkr && usdToAed) ? usdToPkr / usdToAed : null;\n\nconst GRAMS_PER_OZ = 31.1034768;\nconst GRAMS_PER_TOLA = 11.6638038;\nlet gold24kPerTola = null, gold22kPerTola = null, silverPerTola = null;\nif (goldRaw && goldRaw.xau && typeof goldRaw.xau.price === 'number') {\n  const goldPkrPerGram = goldRaw.xau.price;\n  gold24kPerTola = goldPkrPerGram * GRAMS_PER_TOLA;\n  gold22kPerTola = gold24kPerTola * (22/24);\n}\nif (goldRaw && typeof goldRaw.silver_usd_oz === 'number' && usdToPkr) {\n  const silverUsdPerGram = goldRaw.silver_usd_oz / GRAMS_PER_OZ;\n  silverPerTola = silverUsdPerGram * usdToPkr * GRAMS_PER_TOLA;\n}\n\nfunction latestIndexPoint(resp) {\n  if (resp && resp.status === 1 && Array.isArray(resp.data) && resp.data.length > 0) {\n    const point = resp.data[0];\n    return { value: point[1], as_of: new Date(point[0] * 1000).toISOString() };\n  }\n  return null;\n}\nconst kse100 = latestIndexPoint(kse);\nconst kmi30 = latestIndexPoint(kmi);\n\nlet flights = [];\nif (flightsRaw && Array.isArray(flightsRaw.states)) {\n  flights = flightsRaw.states.map(s => ({\n    callsign: (s[1] || '').trim(),\n    origin_country: s[2],\n    longitude: s[5],\n    latitude: s[6],\n    altitude_m: s[7],\n    velocity_ms: s[9],\n    on_ground: s[8]\n  }));\n}\n\nlet civicSearch = { available: false, reason: 'Tavily API key not configured' };\nif (tavily && Array.isArray(tavily.results) && tavily.results.length > 0) {\n  civicSearch = {\n    available: true,\n    source: 'Tavily Search API',\n    results: tavily.results.slice(0, 3).map(r => ({ title: r.title, url: r.url, snippet: (r.content || '').slice(0, 220) }))\n  };\n} else if (tavily && tavily.error) {\n  civicSearch = { available: false, reason: 'Tavily error: ' + (typeof tavily.error === 'string' ? tavily.error : JSON.stringify(tavily.error)) };\n}\n\nreturn [{\n  json: {\n    city: 'Lahore',\n    ingested_at: new Date().toISOString(),\n    weather: {\n      temperature_c: weather.current ? weather.current.temperature_2m : null,\n      humidity_pct: weather.current ? weather.current.relative_humidity_2m : null,\n      precipitation_mm: weather.current ? weather.current.precipitation : null,\n      rain_mm: weather.current ? weather.current.rain : null,\n      wind_speed_kmh: weather.current ? weather.current.wind_speed_10m : null,\n      wind_direction_deg: weather.current ? weather.current.wind_direction_10m : null,\n      pressure_hpa: weather.current ? weather.current.surface_pressure : null,\n      weather_code: weather.current ? weather.current.weather_code : null,\n      hourly_forecast: weather.hourly || null,\n      source: 'Open-Meteo Forecast API (api.open-meteo.com)'\n    },\n    air_quality: {\n      pm2_5: airQuality.current ? airQuality.current.pm2_5 : null,\n      pm10: airQuality.current ? airQuality.current.pm10 : null,\n      co: airQuality.current ? airQuality.current.carbon_monoxide : null,\n      no2: airQuality.current ? airQuality.current.nitrogen_dioxide : null,\n      so2: airQuality.current ? airQuality.current.sulphur_dioxide : null,\n      ozone: airQuality.current ? airQuality.current.ozone : null,\n      us_aqi: airQuality.current ? airQuality.current.us_aqi : null,\n      european_aqi: airQuality.current ? airQuality.current.european_aqi : null,\n      hourly_forecast: airQuality.hourly || null,\n      source: 'Open-Meteo Air Quality API (air-quality-api.open-meteo.com)'\n    },\n    openaq_ground_stations: openaq ? (openaq.results || []) : [],\n    openaq_source: 'OpenAQ v3 API (api.openaq.org)',\n    markets: {\n      forex: { usd_pkr: usdToPkr, sar_pkr: sarToPkr, aed_pkr: aedToPkr, available: !!usdToPkr, source: 'open.er-api.com (free, no key)' },\n      gold_silver: {\n        gold_24k_per_tola_pkr: gold24kPerTola,\n        gold_22k_per_tola_pkr: gold22kPerTola,\n        silver_per_tola_pkr: silverPerTola,\n        available: !!gold24kPerTola,\n        source: 'xaus.com Gold Data API (global spot, PKR-converted)',\n        note: 'Global spot converted rate — not the official APGJA Sarafa Association local rate'\n      },\n      psx: { kse100, kmi30, available: !!kse100, source: 'PSX Data Portal (dps.psx.com.pk) — official public timeseries endpoint' }\n    },\n    flights: {\n      available: flights.length > 0,\n      count: flights.length,\n      aircraft: flights,\n      source: 'OpenSky Network API (opensky-network.org) — anonymous tier, bounding box around Lahore'\n    },\n    civic: {\n      food_prices: { available: false, reason: 'No public JSON API - Qeemat Punjab (PITB) only publishes PDF/HTML bulletins', fallback: civicSearch },\n      lpg_price: { available: false, reason: 'OGRA publishes notifications, not a queryable API', fallback: civicSearch },\n      power_outages: { available: false, reason: 'K-Electric/LESCO/FESCO feeder status has no public API', fallback: civicSearch },\n      trains: { available: false, reason: 'Pakistan Railways RTS has no public API' },\n      traffic: { available: false, reason: 'City Traffic Police / NHMP advisories are not published as an API', fallback: civicSearch }\n    }\n  }\n}];"
+      },
+      "id": "wh-merge-01",
+      "name": "Webhook - Merge",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-16, -496]
+    },
+    {
+      "parameters": {
+        "jsCode": "const d = $input.first().json;\nconst alerts = [];\nif (d.air_quality.us_aqi >= 151) { alerts.push({ type: 'AIR_QUALITY', level: d.air_quality.us_aqi >= 201 ? 'SEVERE' : 'HIGH', message: `US AQI ${d.air_quality.us_aqi} - unhealthy air quality in Lahore` }); }\nif (d.weather.rain_mm >= 15) { alerts.push({ type: 'FLOOD_RISK', level: d.weather.rain_mm >= 30 ? 'SEVERE' : 'MODERATE', message: `Heavy rainfall detected: ${d.weather.rain_mm}mm - elevated flood risk in low-lying areas` }); }\nif (d.weather.temperature_c >= 42) { alerts.push({ type: 'HEAT', level: d.weather.temperature_c >= 45 ? 'SEVERE' : 'HIGH', message: `Extreme heat: ${d.weather.temperature_c}°C` }); }\nd.alerts = alerts;\nreturn [{ json: d }];"
+      },
+      "id": "wh-alerts-01",
+      "name": "Webhook - Detect Alerts",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [240, -496]
+    },
+    {
+      "parameters": { "url": "https://open.er-api.com/v6/latest/USD", "options": {} },
+      "id": "wh-forex-01",
+      "name": "Webhook - Forex",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-304, -992],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": { "url": "https://dps.psx.com.pk/timeseries/int/KSE100", "options": {} },
+      "id": "wh-psx-01",
+      "name": "Webhook - PSX Stocks",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-32, -992],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": { "url": "https://dps.psx.com.pk/timeseries/int/KMI30", "options": {} },
+      "id": "wh-kmi-01",
+      "name": "Webhook - PSX KMI30",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [304, -992],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "url": "https://xaus.com/api/v1/spot",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            { "name": "currency", "value": "PKR" },
+            { "name": "unit", "value": "gram" }
+          ]
+        },
+        "options": { "timeout": 6000 }
+      },
+      "id": "wh-gold-02",
+      "name": "Webhook - Gold",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [624, -992],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "url": "https://opensky-network.org/api/states/all",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            { "name": "lamin", "value": "31.35" },
+            { "name": "lomin", "value": "74.15" },
+            { "name": "lamax", "value": "31.70" },
+            { "name": "lomax", "value": "74.55" }
+          ]
+        },
+        "options": { "timeout": 6000 }
+      },
+      "id": "wh-flights-01",
+      "name": "Webhook - Flights",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1184, -992],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.tavily.com/search",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ api_key: $env.TAVILY_API_KEY, query: \"Lahore vegetable prices today OR LESCO load shedding schedule today OR LPG cylinder price Pakistan today\", max_results: 3, search_depth: \"basic\" }) }}",
+        "options": { "timeout": 6000 }
+      },
+      "id": "wh-tavily-01",
+      "name": "Webhook - Tavily Civic",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1216, -752],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_GOOGLE_SHEET_ID",
+          "mode": "list",
+          "cachedResultName": "Lahore System"
+        },
+        "sheetName": { "__rl": true, "value": "gid=0", "mode": "list", "cachedResultName": "Data" },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Timestamp": "={{ $json.ingested_at }}",
+            "Temperature_C": "={{ $json.weather.temperature_c }}",
+            "Humidity_Pct": "={{ $json.weather.humidity_pct }}",
+            "Precipitation_mm": "={{ $json.weather.precipitation_mm }}",
+            "Wind_Speed_kmh": "={{ $json.weather.wind_speed_kmh }}",
+            "Wind_Direction_deg": "={{ $json.weather.wind_direction_deg }}",
+            "Pressure_hPa": "={{ $json.weather.pressure_hpa }}",
+            "PM2_5": "={{ $json.air_quality.pm2_5 }}",
+            "PM10": "={{ $json.air_quality.pm10 }}",
+            "US_AQI": "={{ $json.air_quality.us_aqi }}",
+            "European_AQI": "={{ $json.air_quality.european_aqi }}",
+            "CO": "={{ $json.air_quality.co }}",
+            "NO2": "={{ $json.air_quality.no2 }}",
+            "SO2": "={{ $json.air_quality.so2 }}",
+            "Ozone": "={{ $json.air_quality.ozone }}",
+            "Alerts": "={{ ($json.alerts && $json.alerts.length) ? $json.alerts.map(a => a.type + ':' + a.level + ' - ' + a.message).join('; ') : 'none' }}"
+          },
+          "matchingColumns": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {}
+      },
+      "id": "9da8d56f-412f-47b9-90e1-53729ccf920e",
+      "name": "Log to Google Sheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [416, 464],
+      "credentials": { "googleSheetsOAuth2Api": { "id": "REPLACE_WITH_YOUR_CREDENTIAL_ID", "name": "Google Sheets account" } },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "function safeGet(nodeName) { try { const item = $(nodeName).first(); return item ? item.json : null; } catch (e) { return null; } }\nconst weather = safeGet('Open-Meteo: Weather') || {};\nconst airQuality = safeGet('Open-Meteo: Air Quality') || {};\nconst openaq = safeGet('OpenAQ: Lahore Stations') || {};\n\nreturn [{\n  json: {\n    city: 'Lahore',\n    ingested_at: new Date().toISOString(),\n    weather: {\n      temperature_c: weather.current ? weather.current.temperature_2m : null,\n      humidity_pct: weather.current ? weather.current.relative_humidity_2m : null,\n      precipitation_mm: weather.current ? weather.current.precipitation : null,\n      rain_mm: weather.current ? weather.current.rain : null,\n      wind_speed_kmh: weather.current ? weather.current.wind_speed_10m : null,\n      wind_direction_deg: weather.current ? weather.current.wind_direction_10m : null,\n      pressure_hpa: weather.current ? weather.current.surface_pressure : null,\n      weather_code: weather.current ? weather.current.weather_code : null,\n      hourly_forecast: weather.hourly || null\n    },\n    air_quality: {\n      pm2_5: airQuality.current ? airQuality.current.pm2_5 : null,\n      pm10: airQuality.current ? airQuality.current.pm10 : null,\n      co: airQuality.current ? airQuality.current.carbon_monoxide : null,\n      no2: airQuality.current ? airQuality.current.nitrogen_dioxide : null,\n      so2: airQuality.current ? airQuality.current.sulphur_dioxide : null,\n      ozone: airQuality.current ? airQuality.current.ozone : null,\n      us_aqi: airQuality.current ? airQuality.current.us_aqi : null,\n      european_aqi: airQuality.current ? airQuality.current.european_aqi : null,\n      hourly_forecast: airQuality.hourly || null\n    },\n    openaq_ground_stations: openaq.results || []\n  }\n}];"
+      },
+      "id": "08b517fd-a12b-42f9-9fc9-428a3de18960",
+      "name": "Merge Live Payload",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-64, 272]
+    },
+    {
+      "parameters": { "rule": { "interval": [{ "field": "hours" }] } },
+      "id": "203eed8c-1b4f-4851-b676-1a58d13c0fd7",
+      "name": "Every 1 Hour (Live Data)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [-576, 256]
+    }
+  ],
+  "connections": {
+    "Daily 3AM (Facilities/OSM)": { "main": [[{ "node": "Overpass: OSM Facilities", "type": "main", "index": 0 }]] },
+    "Open-Meteo: Weather": { "main": [[{ "node": "Open-Meteo: Air Quality", "type": "main", "index": 0 }]] },
+    "Open-Meteo: Air Quality": { "main": [[{ "node": "OpenAQ: Lahore Stations", "type": "main", "index": 0 }]] },
+    "OpenAQ: Lahore Stations": { "main": [[{ "node": "Merge Live Payload", "type": "main", "index": 0 }]] },
+    "Detect Alerts": { "main": [[{ "node": "Log to Google Sheet", "type": "main", "index": 0 }]] },
+    "Overpass: OSM Facilities": { "main": [[{ "node": "Normalize OSM Facilities", "type": "main", "index": 0 }]] },
+    "Normalize OSM Facilities": { "main": [[]] },
+    "Webhook": { "main": [[{ "node": "Webhook - Weather", "type": "main", "index": 0 }]] },
+    "Webhook - Weather": { "main": [[{ "node": "Webhook - Air Quality", "type": "main", "index": 0 }]] },
+    "Webhook - Air Quality": { "main": [[{ "node": "Webhook - OpenAQ", "type": "main", "index": 0 }]] },
+    "Webhook - OpenAQ": { "main": [[{ "node": "Webhook - Forex", "type": "main", "index": 0 }]] },
+    "Webhook - Merge": { "main": [[{ "node": "Webhook - Detect Alerts", "type": "main", "index": 0 }]] },
+    "Webhook - Detect Alerts": { "main": [[{ "node": "Respond to Webhook", "type": "main", "index": 0 }]] },
+    "Webhook - Forex": { "main": [[{ "node": "Webhook - PSX Stocks", "type": "main", "index": 0 }]] },
+    "Webhook - PSX Stocks": { "main": [[{ "node": "Webhook - PSX KMI30", "type": "main", "index": 0 }]] },
+    "Webhook - PSX KMI30": { "main": [[{ "node": "Webhook - Gold", "type": "main", "index": 0 }]] },
+    "Webhook - Gold": { "main": [[{ "node": "Webhook - Flights", "type": "main", "index": 0 }]] },
+    "Webhook - Flights": { "main": [[{ "node": "Webhook - Tavily Civic", "type": "main", "index": 0 }]] },
+    "Webhook - Tavily Civic": { "main": [[{ "node": "Webhook - Merge", "type": "main", "index": 0 }]] },
+    "Merge Live Payload": { "main": [[{ "node": "Detect Alerts", "type": "main", "index": 0 }]] },
+    "Every 1 Hour (Live Data)": { "main": [[{ "node": "Open-Meteo: Weather", "type": "main", "index": 0 }]] }
+  },
+  "pinData": {},
+  "meta": { "templateCredsSetupCompleted": true }
+}

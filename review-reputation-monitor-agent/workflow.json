@@ -1,0 +1,41 @@
+{
+  "nodes": [
+    { "parameters": { "rule": { "interval": [{ "field": "hours", "hoursInterval": 6 }] } }, "id": "rv-trigger-01", "name": "Every 6 Hours", "type": "n8n-nodes-base.scheduleTrigger", "typeVersion": 1.2, "position": [-560, 0] },
+    { "parameters": { "url": "https://maps.googleapis.com/maps/api/place/details/json", "sendQuery": true, "queryParameters": { "parameters": [{ "name": "place_id", "value": "={{ $env.BUSINESS_PLACE_ID }}" }, { "name": "fields", "value": "reviews" }, { "name": "key", "value": "={{ $env.GOOGLE_MAPS_API_KEY }}" }] } }, "id": "rv-fetch-01", "name": "Fetch Reviews", "type": "n8n-nodes-base.httpRequest", "typeVersion": 4.2, "position": [-320, 0] },
+    { "parameters": { "jsCode": "const reviews = $json.result?.reviews || [];\nconst staticData = $getWorkflowStaticData('node');\nconst lastSeen = staticData.lastReviewTime || 0;\nconst newReviews = reviews.filter(r => r.time > lastSeen);\nif (newReviews.length) staticData.lastReviewTime = Math.max(...newReviews.map(r => r.time));\nreturn newReviews.map(r => ({ json: r }));" }, "id": "rv-filter-01", "name": "Filter New Reviews", "type": "n8n-nodes-base.code", "typeVersion": 2, "position": [-80, 0] },
+    { "parameters": { "conditions": { "conditions": [{ "leftValue": "={{ $json.rating }}", "rightValue": 3, "operator": { "type": "number", "operation": "lte" } }] } }, "id": "rv-if-01", "name": "If Rating <= 3", "type": "n8n-nodes-base.if", "typeVersion": 2, "position": [140, 0] },
+    {
+      "parameters": { "promptType": "define", "text": "={{ $json.text }}", "options": { "systemMessage": "Write a short, empathetic response to this negative review. Acknowledge the concern, apologize, and invite them to contact us directly to resolve it." } },
+      "id": "rv-agent-neg-01",
+      "name": "Draft Empathetic Response",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 1.7,
+      "position": [360, -100]
+    },
+    { "parameters": { "model": "gpt-4o-mini" }, "id": "rv-model-01", "name": "OpenAI (Negative)", "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi", "typeVersion": 1, "position": [340, 20] },
+    { "parameters": { "channel": "reputation-alerts", "text": "=Negative review ({{ $json.rating }}★) from {{ $json.author_name }}: {{ $json.output }}" }, "id": "rv-slack-01", "name": "Alert Negative Review", "type": "n8n-nodes-base.slack", "typeVersion": 2.3, "position": [580, -100] },
+    {
+      "parameters": { "promptType": "define", "text": "={{ $json.text }}", "options": { "systemMessage": "Write a short, warm thank-you response to this positive review." } },
+      "id": "rv-agent-pos-01",
+      "name": "Draft Thank-You Response",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 1.7,
+      "position": [360, 100]
+    },
+    { "parameters": { "model": "gpt-4o-mini" }, "id": "rv-model-02", "name": "OpenAI (Positive)", "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi", "typeVersion": 1, "position": [340, 220] },
+    { "parameters": { "operation": "append", "sheetName": { "value": "ReviewLog", "mode": "list" }, "columns": { "mappingMode": "autoMapInputData" } }, "id": "rv-log-01", "name": "Log Review & Response", "type": "n8n-nodes-base.googleSheets", "typeVersion": 4.5, "position": [800, 0] }
+  ],
+  "connections": {
+    "Every 6 Hours": { "main": [[{ "node": "Fetch Reviews", "type": "main", "index": 0 }]] },
+    "Fetch Reviews": { "main": [[{ "node": "Filter New Reviews", "type": "main", "index": 0 }]] },
+    "Filter New Reviews": { "main": [[{ "node": "If Rating <= 3", "type": "main", "index": 0 }]] },
+    "If Rating <= 3": { "main": [[{ "node": "Draft Empathetic Response", "type": "main", "index": 0 }], [{ "node": "Draft Thank-You Response", "type": "main", "index": 0 }]] },
+    "Draft Empathetic Response": { "main": [[{ "node": "Alert Negative Review", "type": "main", "index": 0 }]] },
+    "OpenAI (Negative)": { "ai_languageModel": [[{ "node": "Draft Empathetic Response", "type": "ai_languageModel", "index": 0 }]] },
+    "Alert Negative Review": { "main": [[{ "node": "Log Review & Response", "type": "main", "index": 0 }]] },
+    "Draft Thank-You Response": { "main": [[{ "node": "Log Review & Response", "type": "main", "index": 0 }]] },
+    "OpenAI (Positive)": { "ai_languageModel": [[{ "node": "Draft Thank-You Response", "type": "ai_languageModel", "index": 0 }]] }
+  },
+  "pinData": {},
+  "meta": { "templateCredsSetupCompleted": true }
+}

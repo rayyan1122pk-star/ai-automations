@@ -1,0 +1,46 @@
+{
+  "nodes": [
+    { "parameters": { "rule": { "interval": [{ "field": "hours" }] } }, "id": "sm-trigger-01", "name": "Every Hour", "type": "n8n-nodes-base.scheduleTrigger", "typeVersion": 1.2, "position": [-560, 0] },
+    {
+      "parameters": { "operation": "read", "sheetName": { "value": "ScheduledPosts", "mode": "list" }, "filtersUI": { "values": [{ "lookupColumn": "status", "lookupValue": "pending" }] } },
+      "id": "sm-read-01",
+      "name": "Read Scheduled Posts",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [-320, 0]
+    },
+    { "parameters": { "jsCode": "const now = new Date();\nreturn $input.all().filter(i => new Date(i.json.scheduled_time) <= now);" }, "id": "sm-filter-01", "name": "Filter Due Now", "type": "n8n-nodes-base.code", "typeVersion": 2, "position": [-80, 0] },
+    {
+      "parameters": {
+        "mode": "rules",
+        "rules": {
+          "values": [
+            { "outputKey": "Instagram", "conditions": { "conditions": [{ "leftValue": "={{ $json.platform }}", "rightValue": "instagram", "operator": { "type": "string", "operation": "equals" } }] } },
+            { "outputKey": "LinkedIn", "conditions": { "conditions": [{ "leftValue": "={{ $json.platform }}", "rightValue": "linkedin", "operator": { "type": "string", "operation": "equals" } }] } },
+            { "outputKey": "Twitter", "conditions": { "conditions": [{ "leftValue": "={{ $json.platform }}", "rightValue": "twitter", "operator": { "type": "string", "operation": "equals" } }] } }
+          ]
+        }
+      },
+      "id": "sm-switch-01",
+      "name": "Route by Platform",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [140, 0]
+    },
+    { "parameters": { "method": "POST", "url": "https://graph.instagram.com/v21.0/me/media", "sendBody": true, "specifyBody": "json", "jsonBody": "={{ JSON.stringify({ caption: $json.content, image_url: $json.media_url, access_token: $env.INSTAGRAM_PAGE_ACCESS_TOKEN }) }}" }, "id": "sm-ig-01", "name": "Post to Instagram", "type": "n8n-nodes-base.httpRequest", "typeVersion": 4.2, "position": [360, -120] },
+    { "parameters": { "text": "={{ $json.content }}", "additionalFields": {} }, "id": "sm-li-01", "name": "Post to LinkedIn", "type": "n8n-nodes-base.linkedIn", "typeVersion": 1, "position": [360, 0] },
+    { "parameters": { "text": "={{ $json.content }}" }, "id": "sm-tw-01", "name": "Post to Twitter", "type": "n8n-nodes-base.twitter", "typeVersion": 2, "position": [360, 120] },
+    { "parameters": { "operation": "update", "sheetName": { "value": "ScheduledPosts", "mode": "list" }, "columns": { "mappingMode": "defineBelow", "value": { "status": "posted" } } }, "id": "sm-update-01", "name": "Mark as Posted", "type": "n8n-nodes-base.googleSheets", "typeVersion": 4.5, "position": [580, 0] }
+  ],
+  "connections": {
+    "Every Hour": { "main": [[{ "node": "Read Scheduled Posts", "type": "main", "index": 0 }]] },
+    "Read Scheduled Posts": { "main": [[{ "node": "Filter Due Now", "type": "main", "index": 0 }]] },
+    "Filter Due Now": { "main": [[{ "node": "Route by Platform", "type": "main", "index": 0 }]] },
+    "Route by Platform": { "main": [[{ "node": "Post to Instagram", "type": "main", "index": 0 }], [{ "node": "Post to LinkedIn", "type": "main", "index": 0 }], [{ "node": "Post to Twitter", "type": "main", "index": 0 }]] },
+    "Post to Instagram": { "main": [[{ "node": "Mark as Posted", "type": "main", "index": 0 }]] },
+    "Post to LinkedIn": { "main": [[{ "node": "Mark as Posted", "type": "main", "index": 0 }]] },
+    "Post to Twitter": { "main": [[{ "node": "Mark as Posted", "type": "main", "index": 0 }]] }
+  },
+  "pinData": {},
+  "meta": { "templateCredsSetupCompleted": true }
+}

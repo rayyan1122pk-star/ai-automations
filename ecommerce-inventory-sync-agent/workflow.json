@@ -1,0 +1,21 @@
+{
+  "nodes": [
+    { "parameters": { "path": "new-order", "responseMode": "responseNode" }, "id": "ec-webhook-01", "name": "New Order Webhook", "type": "n8n-nodes-base.webhook", "typeVersion": 2.1, "position": [-560, 0] },
+    { "parameters": { "jsCode": "const order = $json.body;\nreturn order.line_items.map(li => ({ json: { sku: li.sku, quantity: li.quantity, order_id: order.id } }));" }, "id": "ec-parse-01", "name": "Parse Order Line Items", "type": "n8n-nodes-base.code", "typeVersion": 2, "position": [-320, 0] },
+    { "parameters": { "operation": "lookup", "sheetName": { "value": "Inventory", "mode": "list" }, "lookupColumn": "sku", "lookupValue": "={{ $json.sku }}" }, "id": "ec-lookup-01", "name": "Look Up Current Stock", "type": "n8n-nodes-base.googleSheets", "typeVersion": 4.5, "position": [-80, 0] },
+    { "parameters": { "operation": "update", "sheetName": { "value": "Inventory", "mode": "list" }, "columns": { "mappingMode": "defineBelow", "value": { "stock": "={{ $json.stock - $('Parse Order Line Items').item.json.quantity }}" } } }, "id": "ec-update-01", "name": "Decrement Stock", "type": "n8n-nodes-base.googleSheets", "typeVersion": 4.5, "position": [140, 0] },
+    { "parameters": { "conditions": { "conditions": [{ "leftValue": "={{ $json.stock }}", "rightValue": 10, "operator": { "type": "number", "operation": "lt" } }] } }, "id": "ec-if-01", "name": "If Stock Below 10", "type": "n8n-nodes-base.if", "typeVersion": 2, "position": [360, 0] },
+    { "parameters": { "channel": "inventory-alerts", "text": "=Low stock: {{ $('Parse Order Line Items').item.json.sku }} — {{ $json.stock }} units left" }, "id": "ec-slack-01", "name": "Low Stock Slack Alert", "type": "n8n-nodes-base.slack", "typeVersion": 2.3, "position": [580, -60] },
+    { "parameters": { "sendTo": "supplier@example.com", "subject": "=Reorder needed: {{ $('Parse Order Line Items').item.json.sku }}", "message": "Stock has fallen below threshold — please arrange a reorder." }, "id": "ec-email-01", "name": "Notify Supplier Reorder", "type": "n8n-nodes-base.gmail", "typeVersion": 2.1, "position": [580, 60] },
+    { "parameters": { "operation": "append", "sheetName": { "value": "Orders", "mode": "list" }, "columns": { "mappingMode": "autoMapInputData" } }, "id": "ec-log-01", "name": "Log Order", "type": "n8n-nodes-base.googleSheets", "typeVersion": 4.5, "position": [360, 140] }
+  ],
+  "connections": {
+    "New Order Webhook": { "main": [[{ "node": "Parse Order Line Items", "type": "main", "index": 0 }]] },
+    "Parse Order Line Items": { "main": [[{ "node": "Look Up Current Stock", "type": "main", "index": 0 }, { "node": "Log Order", "type": "main", "index": 0 }]] },
+    "Look Up Current Stock": { "main": [[{ "node": "Decrement Stock", "type": "main", "index": 0 }]] },
+    "Decrement Stock": { "main": [[{ "node": "If Stock Below 10", "type": "main", "index": 0 }]] },
+    "If Stock Below 10": { "main": [[{ "node": "Low Stock Slack Alert", "type": "main", "index": 0 }, { "node": "Notify Supplier Reorder", "type": "main", "index": 0 }], []] }
+  },
+  "pinData": {},
+  "meta": { "templateCredsSetupCompleted": true }
+}

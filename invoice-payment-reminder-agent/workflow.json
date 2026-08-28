@@ -1,0 +1,30 @@
+{
+  "nodes": [
+    { "parameters": { "rule": { "interval": [{ "triggerAtHour": 9 }] } }, "id": "ir-trigger-01", "name": "Daily 9AM", "type": "n8n-nodes-base.scheduleTrigger", "typeVersion": 1.2, "position": [-560, 0] },
+    { "parameters": { "operation": "read", "sheetName": { "value": "Invoices", "mode": "list" } }, "id": "ir-read-01", "name": "Read Invoices", "type": "n8n-nodes-base.googleSheets", "typeVersion": 4.5, "position": [-320, 0] },
+    {
+      "parameters": {
+        "jsCode": "const today = new Date();\nreturn $input.all().filter(item => {\n  if (item.json.status === 'paid') return false;\n  const due = new Date(item.json.due_date);\n  return due <= today || (due - today) / 86400000 <= 3;\n}).map(item => {\n  const due = new Date(item.json.due_date);\n  const daysOverdue = Math.floor((today - due) / 86400000);\n  return { json: { ...item.json, days_overdue: daysOverdue } };\n});"
+      },
+      "id": "ir-filter-01",
+      "name": "Filter Overdue/Due Soon",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-80, 0]
+    },
+    { "parameters": { "conditions": { "conditions": [{ "leftValue": "={{ $json.days_overdue }}", "rightValue": 7, "operator": { "type": "number", "operation": "gt" } }] } }, "id": "ir-if-01", "name": "If Overdue > 7 Days", "type": "n8n-nodes-base.if", "typeVersion": 2, "position": [140, 0] },
+    { "parameters": { "sendTo": "={{ $json.client_email }}", "subject": "=Overdue Invoice #{{ $json.invoice_number }}", "message": "=This invoice is now {{ $json.days_overdue }} days overdue. Please arrange payment at your earliest convenience." }, "id": "ir-escalate-01", "name": "Send Escalated Reminder", "type": "n8n-nodes-base.gmail", "typeVersion": 2.1, "position": [360, -60] },
+    { "parameters": { "sendTo": "={{ $json.client_email }}", "subject": "=Reminder: Invoice #{{ $json.invoice_number }} due soon", "message": "This is a friendly reminder that your invoice is coming due shortly." }, "id": "ir-gentle-01", "name": "Send Friendly Reminder", "type": "n8n-nodes-base.gmail", "typeVersion": 2.1, "position": [360, 60] },
+    { "parameters": { "operation": "update", "sheetName": { "value": "Invoices", "mode": "list" }, "columns": { "mappingMode": "defineBelow", "value": { "last_reminder_sent": "={{ new Date().toISOString() }}" } } }, "id": "ir-update-01", "name": "Update Last Reminder Sent", "type": "n8n-nodes-base.googleSheets", "typeVersion": 4.5, "position": [580, 0] }
+  ],
+  "connections": {
+    "Daily 9AM": { "main": [[{ "node": "Read Invoices", "type": "main", "index": 0 }]] },
+    "Read Invoices": { "main": [[{ "node": "Filter Overdue/Due Soon", "type": "main", "index": 0 }]] },
+    "Filter Overdue/Due Soon": { "main": [[{ "node": "If Overdue > 7 Days", "type": "main", "index": 0 }]] },
+    "If Overdue > 7 Days": { "main": [[{ "node": "Send Escalated Reminder", "type": "main", "index": 0 }], [{ "node": "Send Friendly Reminder", "type": "main", "index": 0 }]] },
+    "Send Escalated Reminder": { "main": [[{ "node": "Update Last Reminder Sent", "type": "main", "index": 0 }]] },
+    "Send Friendly Reminder": { "main": [[{ "node": "Update Last Reminder Sent", "type": "main", "index": 0 }]] }
+  },
+  "pinData": {},
+  "meta": { "templateCredsSetupCompleted": true }
+}

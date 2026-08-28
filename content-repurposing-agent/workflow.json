@@ -1,0 +1,33 @@
+{
+  "nodes": [
+    { "parameters": { "path": "repurpose-content", "responseMode": "responseNode" }, "id": "cr-webhook-01", "name": "New Content Webhook", "type": "n8n-nodes-base.webhook", "typeVersion": 2.1, "position": [-560, 0] },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $json.body.content }}",
+        "hasOutputParser": true,
+        "options": { "systemMessage": "Repurpose this long-form content into: a 5-tweet Twitter/X thread, a LinkedIn post (professional tone), and an Instagram caption (casual, with relevant hashtags). Keep the core message consistent across all three." }
+      },
+      "id": "cr-agent-01",
+      "name": "AI Agent: Generate Variants",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 1.7,
+      "position": [-320, 0]
+    },
+    { "parameters": { "model": "gpt-4o-mini" }, "id": "cr-model-01", "name": "OpenAI", "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi", "typeVersion": 1, "position": [-360, 160] },
+    { "parameters": { "schemaType": "manual", "inputSchema": "{\"type\":\"object\",\"properties\":{\"twitter_thread\":{\"type\":\"array\",\"items\":{\"type\":\"string\"}},\"linkedin_post\":{\"type\":\"string\"},\"instagram_caption\":{\"type\":\"string\"}}}" }, "id": "cr-parser-01", "name": "Structured Output", "type": "@n8n/n8n-nodes-langchain.outputParserStructured", "typeVersion": 1.2, "position": [-240, 160] },
+    { "parameters": { "operation": "append", "sheetName": { "value": "ContentDrafts", "mode": "list" }, "columns": { "mappingMode": "autoMapInputData" } }, "id": "cr-save-01", "name": "Save Drafts to Sheet", "type": "n8n-nodes-base.googleSheets", "typeVersion": 4.5, "position": [-80, 0] },
+    { "parameters": { "channel": "content-review", "text": "New repurposed content drafts are ready for review in the sheet." }, "id": "cr-slack-01", "name": "Notify Ready for Review", "type": "n8n-nodes-base.slack", "typeVersion": 2.3, "position": [140, 0] },
+    { "parameters": { "respondWith": "json", "responseBody": "={{ { status: 'queued' } }}" }, "id": "cr-respond-01", "name": "Respond to Webhook", "type": "n8n-nodes-base.respondToWebhook", "typeVersion": 1.5, "position": [360, 0] }
+  ],
+  "connections": {
+    "New Content Webhook": { "main": [[{ "node": "AI Agent: Generate Variants", "type": "main", "index": 0 }]] },
+    "AI Agent: Generate Variants": { "main": [[{ "node": "Save Drafts to Sheet", "type": "main", "index": 0 }]] },
+    "OpenAI": { "ai_languageModel": [[{ "node": "AI Agent: Generate Variants", "type": "ai_languageModel", "index": 0 }]] },
+    "Structured Output": { "ai_outputParser": [[{ "node": "AI Agent: Generate Variants", "type": "ai_outputParser", "index": 0 }]] },
+    "Save Drafts to Sheet": { "main": [[{ "node": "Notify Ready for Review", "type": "main", "index": 0 }]] },
+    "Notify Ready for Review": { "main": [[{ "node": "Respond to Webhook", "type": "main", "index": 0 }]] }
+  },
+  "pinData": {},
+  "meta": { "templateCredsSetupCompleted": true }
+}

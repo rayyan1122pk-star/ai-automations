@@ -1,0 +1,34 @@
+{
+  "nodes": [
+    { "parameters": { "rule": { "interval": [{ "triggerAtHour": 8 }] } }, "id": "ja-trigger-01", "name": "Daily 8AM", "type": "n8n-nodes-base.scheduleTrigger", "typeVersion": 1.2, "position": [-560, 0] },
+    { "parameters": { "url": "https://api.example-jobboard.com/search", "sendQuery": true, "queryParameters": { "parameters": [{ "name": "keywords", "value": "AI automation OR web developer" }] } }, "id": "ja-search-01", "name": "Search Job Boards", "type": "n8n-nodes-base.httpRequest", "typeVersion": 4.2, "position": [-320, 0] },
+    { "parameters": { "jsCode": "const keywords = ['n8n', 'AI agent', 'automation', 'Next.js', 'web developer'];\nreturn $input.all().filter(i => {\n  const text = (i.json.title + ' ' + i.json.description).toLowerCase();\n  return keywords.some(k => text.includes(k.toLowerCase()));\n});" }, "id": "ja-filter-01", "name": "Filter Matching Listings", "type": "n8n-nodes-base.code", "typeVersion": 2, "position": [-80, 0] },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $json.description }}",
+        "options": { "systemMessage": "Write a short, tailored cover letter for this job listing on behalf of Muhammad Rayyan, founder of Ascenta (web development & AI automation agency). Reference relevant experience: AI agents, n8n automation, Next.js websites. Keep it under 150 words, professional and direct." }
+      },
+      "id": "ja-agent-01",
+      "name": "Generate Cover Letter",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 1.7,
+      "position": [140, 0]
+    },
+    { "parameters": { "model": "gpt-4o-mini" }, "id": "ja-model-01", "name": "OpenAI", "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi", "typeVersion": 1, "position": [120, 160] },
+    { "parameters": { "sendTo": "={{ $json.contact_email }}", "subject": "=Application: {{ $json.title }}", "message": "={{ $json.output }}" }, "id": "ja-draft-01", "name": "Create Gmail Draft", "type": "n8n-nodes-base.gmail", "typeVersion": 2.1, "position": [360, -60] },
+    { "parameters": { "operation": "append", "sheetName": { "value": "Applications", "mode": "list" }, "columns": { "mappingMode": "autoMapInputData" } }, "id": "ja-log-01", "name": "Log Application Status", "type": "n8n-nodes-base.googleSheets", "typeVersion": 4.5, "position": [360, 60] },
+    { "parameters": { "channel": "job-applications", "text": "=New application drafts ready for review — check Gmail drafts and the Applications sheet." }, "id": "ja-slack-01", "name": "Notify Drafts Ready", "type": "n8n-nodes-base.slack", "typeVersion": 2.3, "position": [580, 0] }
+  ],
+  "connections": {
+    "Daily 8AM": { "main": [[{ "node": "Search Job Boards", "type": "main", "index": 0 }]] },
+    "Search Job Boards": { "main": [[{ "node": "Filter Matching Listings", "type": "main", "index": 0 }]] },
+    "Filter Matching Listings": { "main": [[{ "node": "Generate Cover Letter", "type": "main", "index": 0 }]] },
+    "Generate Cover Letter": { "main": [[{ "node": "Create Gmail Draft", "type": "main", "index": 0 }, { "node": "Log Application Status", "type": "main", "index": 0 }]] },
+    "OpenAI": { "ai_languageModel": [[{ "node": "Generate Cover Letter", "type": "ai_languageModel", "index": 0 }]] },
+    "Create Gmail Draft": { "main": [[{ "node": "Notify Drafts Ready", "type": "main", "index": 0 }]] },
+    "Log Application Status": { "main": [[{ "node": "Notify Drafts Ready", "type": "main", "index": 0 }]] }
+  },
+  "pinData": {},
+  "meta": { "templateCredsSetupCompleted": true }
+}

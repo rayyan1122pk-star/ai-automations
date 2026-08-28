@@ -1,0 +1,41 @@
+{
+  "nodes": [
+    { "parameters": {}, "id": "ls-manual-01", "name": "Manual Trigger", "type": "n8n-nodes-base.manualTrigger", "typeVersion": 1, "position": [-560, 0] },
+    {
+      "parameters": {
+        "url": "https://maps.googleapis.com/maps/api/place/textsearch/json",
+        "sendQuery": true,
+        "queryParameters": { "parameters": [{ "name": "query", "value": "={{ $json.keyword }} in {{ $json.location }}" }, { "name": "key", "value": "={{ $env.GOOGLE_MAPS_API_KEY }}" }] }
+      },
+      "id": "ls-maps-01",
+      "name": "Google Maps: Search Businesses",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-320, 0]
+    },
+    { "parameters": { "fieldToSplitOut": "results", "options": {} }, "id": "ls-split-01", "name": "Split Out Results", "type": "n8n-nodes-base.splitOut", "typeVersion": 1, "position": [-80, 0] },
+    {
+      "parameters": {
+        "jsCode": "const r = $json;\nconst hasWebsite = !!r.website;\nconst rating = r.rating || 0;\nconst reviewCount = r.user_ratings_total || 0;\nlet score = 0;\nif (!hasWebsite) score += 40; // strong opportunity - no site yet\nif (rating < 4.0 && reviewCount > 10) score += 20; // reputation opportunity\nif (reviewCount > 50) score += 20; // established business, budget likely\nif (rating >= 4.5) score += 10;\nreturn [{ json: { name: r.name, address: r.formatted_address, rating, review_count: reviewCount, has_website: hasWebsite, place_id: r.place_id, score } }];"
+      },
+      "id": "ls-score-01",
+      "name": "Score Lead",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [140, 0]
+    },
+    { "parameters": { "operation": "append", "sheetName": { "value": "Leads", "mode": "list" }, "columns": { "mappingMode": "autoMapInputData" } }, "id": "ls-log-01", "name": "Append to Leads Sheet", "type": "n8n-nodes-base.googleSheets", "typeVersion": 4.5, "position": [360, 0] },
+    { "parameters": { "conditions": { "conditions": [{ "leftValue": "={{ $json.score }}", "rightValue": 50, "operator": { "type": "number", "operation": "gte" } }] } }, "id": "ls-if-01", "name": "If High Score", "type": "n8n-nodes-base.if", "typeVersion": 2, "position": [580, 0] },
+    { "parameters": { "channel": "hot-leads", "text": "=High-potential lead found: {{ $json.name }} (score {{ $json.score }}) — {{ $json.address }}" }, "id": "ls-slack-01", "name": "Notify Hot Lead", "type": "n8n-nodes-base.slack", "typeVersion": 2.3, "position": [800, -60] }
+  ],
+  "connections": {
+    "Manual Trigger": { "main": [[{ "node": "Google Maps: Search Businesses", "type": "main", "index": 0 }]] },
+    "Google Maps: Search Businesses": { "main": [[{ "node": "Split Out Results", "type": "main", "index": 0 }]] },
+    "Split Out Results": { "main": [[{ "node": "Score Lead", "type": "main", "index": 0 }]] },
+    "Score Lead": { "main": [[{ "node": "Append to Leads Sheet", "type": "main", "index": 0 }]] },
+    "Append to Leads Sheet": { "main": [[{ "node": "If High Score", "type": "main", "index": 0 }]] },
+    "If High Score": { "main": [[{ "node": "Notify Hot Lead", "type": "main", "index": 0 }], []] }
+  },
+  "pinData": {},
+  "meta": { "templateCredsSetupCompleted": true }
+}

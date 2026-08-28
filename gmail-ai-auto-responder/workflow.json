@@ -1,0 +1,98 @@
+{
+  "nodes": [
+    {
+      "parameters": { "pollTimes": { "item": [{ "mode": "everyMinute" }] }, "simple": false, "filters": { "q": "is:unread" } },
+      "id": "gm-trigger-01",
+      "name": "Trigger on New Email",
+      "type": "n8n-nodes-base.gmailTrigger",
+      "typeVersion": 1.2,
+      "position": [-560, 0]
+    },
+    {
+      "parameters": { "operation": "get", "messageId": "={{ $json.id }}" },
+      "id": "gm-getmsg-01",
+      "name": "Get Unread Email",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [-320, 0]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            { "name": "from", "value": "={{ $json.headers.from }}" },
+            { "name": "subject", "value": "={{ $json.headers.subject }}" },
+            { "name": "body", "value": "={{ $json.text }}" }
+          ]
+        }
+      },
+      "id": "gm-fields-01",
+      "name": "Get Required Fields",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [-80, 0]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $json.body }}",
+        "hasOutputParser": true,
+        "options": {
+          "systemMessage": "You triage inbound business emails. Decide whether you have enough information to draft a helpful reply. If yes, write a professional draft reply. If not, set can_respond to false."
+        }
+      },
+      "id": "gm-agent-01",
+      "name": "AI Agent",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 1.7,
+      "position": [140, 0]
+    },
+    { "parameters": { "model": "gpt-4o-mini" }, "id": "gm-model-01", "name": "OpenAI", "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi", "typeVersion": 1, "position": [100, 180] },
+    { "parameters": {}, "id": "gm-mem-01", "name": "Memory", "type": "@n8n/n8n-nodes-langchain.memoryBufferWindow", "typeVersion": 1.3, "position": [180, 180] },
+    {
+      "parameters": { "schemaType": "manual", "inputSchema": "{\"type\":\"object\",\"properties\":{\"can_respond\":{\"type\":\"boolean\"},\"draft_reply\":{\"type\":\"string\"}}}" },
+      "id": "gm-parser-01",
+      "name": "Structured Output",
+      "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
+      "typeVersion": 1.2,
+      "position": [260, 180]
+    },
+    {
+      "parameters": { "conditions": { "conditions": [{ "leftValue": "={{ $json.output.can_respond }}", "rightValue": true, "operator": { "type": "boolean", "operation": "equals" } }] } },
+      "id": "gm-canrespond-01",
+      "name": "Can AI Agent Respond?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [360, 0]
+    },
+    {
+      "parameters": { "operation": "reply", "messageId": "={{ $('Get Unread Email').item.json.id }}", "message": "={{ $json.output.draft_reply }}" },
+      "id": "gm-draft-01",
+      "name": "Create a draft",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [580, -60]
+    },
+    {
+      "parameters": { "operation": "addLabels", "messageId": "={{ $('Get Unread Email').item.json.id }}", "labelIds": ["Action"] },
+      "id": "gm-label-01",
+      "name": "Label Email As \"Action\"",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [800, -60]
+    }
+  ],
+  "connections": {
+    "Trigger on New Email": { "main": [[{ "node": "Get Unread Email", "type": "main", "index": 0 }]] },
+    "Get Unread Email": { "main": [[{ "node": "Get Required Fields", "type": "main", "index": 0 }]] },
+    "Get Required Fields": { "main": [[{ "node": "AI Agent", "type": "main", "index": 0 }]] },
+    "AI Agent": { "main": [[{ "node": "Can AI Agent Respond?", "type": "main", "index": 0 }]] },
+    "OpenAI": { "ai_languageModel": [[{ "node": "AI Agent", "type": "ai_languageModel", "index": 0 }]] },
+    "Memory": { "ai_memory": [[{ "node": "AI Agent", "type": "ai_memory", "index": 0 }]] },
+    "Structured Output": { "ai_outputParser": [[{ "node": "AI Agent", "type": "ai_outputParser", "index": 0 }]] },
+    "Can AI Agent Respond?": { "main": [[{ "node": "Create a draft", "type": "main", "index": 0 }], []] },
+    "Create a draft": { "main": [[{ "node": "Label Email As \"Action\"", "type": "main", "index": 0 }]] }
+  },
+  "pinData": {},
+  "meta": { "templateCredsSetupCompleted": true }
+}
