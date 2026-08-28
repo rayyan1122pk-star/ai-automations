@@ -2,7 +2,7 @@
 
 A collection of production-style n8n workflows built for real business automation use cases: AI agents, lead generation, financial ops, content, and customer support. Each folder contains a working `workflow.json` (importable directly into n8n) and a `README.md` explaining what it does and how it's wired.
 
-Built by [Ascenta](https://ascenta.up.railway.app) — web development & AI automation agency.
+Built by [Ascenta](https://ascenta-agency.vercel.app) — web development & AI automation agency.
 
 ## Workflows
 
