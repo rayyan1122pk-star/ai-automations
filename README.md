@@ -22,6 +22,9 @@ Built by [Ascenta](https://ascenta-agency.vercel.app) — web development & AI a
 | [job-application-draft-agent](./job-application-draft-agent) | Outreach | Finds matching job posts and drafts tailored applications for review |
 | [ecommerce-inventory-sync-agent](./ecommerce-inventory-sync-agent) | E-commerce | Syncs orders to inventory and alerts on low stock |
 | [review-reputation-monitor-agent](./review-reputation-monitor-agent) | Reputation | Monitors new reviews and drafts responses automatically |
+| [whatsapp-order-taking-agent](./whatsapp-order-taking-agent) | Commerce | Conversational WhatsApp agent that takes orders against a live catalog and logs them |
+| [rag-company-knowledge-agent](./rag-company-knowledge-agent) | Internal Ops | Slack RAG assistant answering from company docs, with a nightly ingestion workflow |
+| [competitor-intel-digest-agent](./competitor-intel-digest-agent) | Market Intelligence | Diff-based competitor watch that emails a ranked change digest each weekday |
 
 ## Stack
 

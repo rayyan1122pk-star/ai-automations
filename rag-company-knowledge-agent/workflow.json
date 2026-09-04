@@ -1,0 +1,45 @@
+{
+  "nodes": [
+    { "parameters": { "rule": { "interval": [{ "field": "hours", "triggerAtHour": 2 }] } }, "id": "kb-cron-01", "name": "Nightly Schedule", "type": "n8n-nodes-base.scheduleTrigger", "typeVersion": 1.2, "position": [-820, -200] },
+    { "parameters": { "resource": "fileFolder", "operation": "list", "filter": { "folderId": { "value": "={{ $env.KB_DRIVE_FOLDER_ID }}", "mode": "id" } }, "options": {} }, "id": "kb-list-01", "name": "Drive: List Files", "type": "n8n-nodes-base.googleDrive", "typeVersion": 3, "position": [-600, -200] },
+    { "parameters": { "operation": "download", "fileId": { "value": "={{ $json.id }}", "mode": "id" }, "options": {} }, "id": "kb-dl-01", "name": "Download File", "type": "n8n-nodes-base.googleDrive", "typeVersion": 3, "position": [-380, -200] },
+    { "parameters": { "mode": "insert", "tableName": { "value": "={{ $env.SUPABASE_KB_TABLE }}", "mode": "id" }, "options": { "queryName": "match_documents" } }, "id": "kb-store-01", "name": "Supabase Vector Store", "type": "@n8n/n8n-nodes-langchain.vectorStoreSupabase", "typeVersion": 1.1, "position": [-140, -200] },
+    { "parameters": { "options": { "metadata": { "metadataValues": [{ "name": "file_id", "value": "={{ $('Download File').item.json.id }}" }, { "name": "file_name", "value": "={{ $('Download File').item.json.name }}" }] } } }, "id": "kb-loader-01", "name": "Default Data Loader", "type": "@n8n/n8n-nodes-langchain.documentDefaultDataLoader", "typeVersion": 1, "position": [-140, 20] },
+    { "parameters": { "chunkSize": 1000, "chunkOverlap": 150, "options": {} }, "id": "kb-split-01", "name": "Recursive Splitter", "type": "@n8n/n8n-nodes-langchain.textSplitterRecursiveCharacterTextSplitter", "typeVersion": 1, "position": [-140, 200] },
+    { "parameters": { "options": {} }, "id": "kb-embed-01", "name": "Embeddings (Ingest)", "type": "@n8n/n8n-nodes-langchain.embeddingsOpenAi", "typeVersion": 1.2, "position": [-360, 20] },
+
+    { "parameters": {}, "id": "kb-slacktrigger-01", "name": "Slack Trigger", "type": "n8n-nodes-base.slackTrigger", "typeVersion": 1, "position": [-820, 500] },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $json.text }}",
+        "options": { "systemMessage": "You are a company knowledge assistant. Answer ONLY from the context returned by the knowledge_base tool. Always call the tool first. Cite the source file name for each fact. If the tool returns nothing relevant, reply that the knowledge base does not cover this - do not answer from general knowledge." }
+      },
+      "id": "kb-agent-01",
+      "name": "AI Agent: Knowledge Assistant",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 1.7,
+      "position": [-560, 500]
+    },
+    { "parameters": { "model": "gpt-4o-mini", "options": { "temperature": 0 } }, "id": "kb-model-01", "name": "OpenAI (Answer)", "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi", "typeVersion": 1, "position": [-620, 700] },
+    { "parameters": { "mode": "retrieve-as-tool", "toolName": "knowledge_base", "toolDescription": "Semantic search over internal company documents. Returns the most relevant passages with their source file names.", "tableName": { "value": "={{ $env.SUPABASE_KB_TABLE }}", "mode": "id" }, "topK": 5, "options": { "queryName": "match_documents" } }, "id": "kb-retriever-01", "name": "Supabase Retriever Tool", "type": "@n8n/n8n-nodes-langchain.vectorStoreSupabase", "typeVersion": 1.1, "position": [-420, 700] },
+    { "parameters": { "options": {} }, "id": "kb-embed-02", "name": "Embeddings (Query)", "type": "@n8n/n8n-nodes-langchain.embeddingsOpenAi", "typeVersion": 1.2, "position": [-420, 880] },
+    { "parameters": { "select": "channel", "channelId": { "value": "={{ $('Slack Trigger').item.json.channel }}", "mode": "id" }, "text": "={{ $json.output }}", "otherOptions": { "thread_ts": { "replyValues": { "thread_ts": "={{ $('Slack Trigger').item.json.ts }}" } } } }, "id": "kb-reply-01", "name": "Slack: Reply in Thread", "type": "n8n-nodes-base.slack", "typeVersion": 2.3, "position": [-300, 500] }
+  ],
+  "connections": {
+    "Nightly Schedule": { "main": [[{ "node": "Drive: List Files", "type": "main", "index": 0 }]] },
+    "Drive: List Files": { "main": [[{ "node": "Download File", "type": "main", "index": 0 }]] },
+    "Download File": { "main": [[{ "node": "Supabase Vector Store", "type": "main", "index": 0 }]] },
+    "Embeddings (Ingest)": { "ai_embedding": [[{ "node": "Supabase Vector Store", "type": "ai_embedding", "index": 0 }]] },
+    "Default Data Loader": { "ai_document": [[{ "node": "Supabase Vector Store", "type": "ai_document", "index": 0 }]] },
+    "Recursive Splitter": { "ai_textSplitter": [[{ "node": "Default Data Loader", "type": "ai_textSplitter", "index": 0 }]] },
+
+    "Slack Trigger": { "main": [[{ "node": "AI Agent: Knowledge Assistant", "type": "main", "index": 0 }]] },
+    "OpenAI (Answer)": { "ai_languageModel": [[{ "node": "AI Agent: Knowledge Assistant", "type": "ai_languageModel", "index": 0 }]] },
+    "Supabase Retriever Tool": { "ai_tool": [[{ "node": "AI Agent: Knowledge Assistant", "type": "ai_tool", "index": 0 }]] },
+    "Embeddings (Query)": { "ai_embedding": [[{ "node": "Supabase Retriever Tool", "type": "ai_embedding", "index": 0 }]] },
+    "AI Agent: Knowledge Assistant": { "main": [[{ "node": "Slack: Reply in Thread", "type": "main", "index": 0 }]] }
+  },
+  "pinData": {},
+  "meta": { "templateCredsSetupCompleted": true }
+}
