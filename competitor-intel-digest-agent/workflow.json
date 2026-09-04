@@ -1,0 +1,68 @@
+{
+  "nodes": [
+    { "parameters": { "rule": { "interval": [{ "field": "cronExpression", "expression": "0 7 * * 1-5" }] } }, "id": "ci-cron-01", "name": "Weekday Morning", "type": "n8n-nodes-base.scheduleTrigger", "typeVersion": 1.2, "position": [-1080, 0] },
+    { "parameters": { "documentId": { "value": "={{ $env.WATCHLIST_SHEET_ID }}", "mode": "id" }, "sheetName": { "value": "watchlist", "mode": "list" }, "options": {} }, "id": "ci-watchlist-01", "name": "Get Watchlist", "type": "n8n-nodes-base.googleSheets", "typeVersion": 4.5, "position": [-860, 0] },
+    { "parameters": { "url": "={{ $json.url }}", "options": { "response": { "response": { "neverError": true } } } }, "id": "ci-fetch-01", "name": "HTTP: Fetch Page", "type": "n8n-nodes-base.httpRequest", "typeVersion": 4.2, "position": [-640, 0] },
+    { "parameters": { "url": "https://newsapi.org/v2/everything", "sendQuery": true, "queryParameters": { "parameters": [{ "name": "q", "value": "={{ $('Get Watchlist').item.json.news_query }}" }, { "name": "sortBy", "value": "publishedAt" }, { "name": "pageSize", "value": "5" }, { "name": "apiKey", "value": "={{ $env.NEWS_API_KEY }}" }] }, "options": { "response": { "response": { "neverError": true } } } }, "id": "ci-news-01", "name": "HTTP: News Search", "type": "n8n-nodes-base.httpRequest", "typeVersion": 4.2, "position": [-420, 0] },
+    { "parameters": { "operation": "lookup", "documentId": { "value": "={{ $env.STATE_SHEET_ID }}", "mode": "id" }, "sheetName": { "value": "state", "mode": "list" }, "lookupColumn": "competitor", "lookupValue": "={{ $('Get Watchlist').item.json.competitor }}", "options": { "returnAllMatches": false } }, "id": "ci-state-read-01", "name": "Get Prior State", "type": "n8n-nodes-base.googleSheets", "typeVersion": 4.5, "position": [-200, 0], "alwaysOutputData": true, "onError": "continueRegularOutput" },
+    {
+      "parameters": {
+        "jsCode": "const crypto = require('crypto');\nconst comp = $('Get Watchlist').item.json;\nconst page = $('HTTP: Fetch Page').item.json;\nconst news = $('HTTP: News Search').item.json;\nconst prior = $input.item.json || {};\n\nconst body = typeof page === 'string' ? page : JSON.stringify(page);\nconst text = body\n  .replace(/<script[\\s\\S]*?<\\/script>/gi, '')\n  .replace(/<style[\\s\\S]*?<\\/style>/gi, '')\n  .replace(/<[^>]+>/g, ' ')\n  .replace(/\\s+/g, ' ')\n  .trim();\nconst hash = crypto.createHash('sha256').update(text).digest('hex');\nconst changed = Boolean(prior.last_hash) && prior.last_hash !== hash;\n\nreturn [{ json: {\n  competitor: comp.competitor,\n  url: comp.url,\n  changed,\n  first_run: !prior.last_hash,\n  new_hash: hash,\n  page_excerpt: text.slice(0, 4000),\n  news: (news && news.articles ? news.articles : []).map(a => ({ title: a.title, url: a.url, snippet: a.description }))\n} }];"
+      },
+      "id": "ci-detect-01",
+      "name": "Detect Change",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [20, 0]
+    },
+    { "parameters": { "operation": "appendOrUpdate", "documentId": { "value": "={{ $env.STATE_SHEET_ID }}", "mode": "id" }, "sheetName": { "value": "state", "mode": "list" }, "columns": { "mappingMode": "defineBelow", "matchingColumns": ["competitor"], "value": { "competitor": "={{ $json.competitor }}", "last_hash": "={{ $json.new_hash }}", "last_checked": "={{ $now.toISO() }}" } } }, "id": "ci-state-write-01", "name": "Update Hashes", "type": "n8n-nodes-base.googleSheets", "typeVersion": 4.5, "position": [240, 160] },
+    { "parameters": { "conditions": { "options": {}, "conditions": [{ "leftValue": "={{ $json.changed }}", "rightValue": true, "operator": { "type": "boolean", "operation": "true", "singleValue": true } }] } }, "id": "ci-if-01", "name": "Something Changed?", "type": "n8n-nodes-base.if", "typeVersion": 2.2, "position": [240, -40] },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Competitor: {{ $json.competitor }}\nURL: {{ $json.url }}\n\nPage excerpt:\n{{ $json.page_excerpt }}\n\nRecent news:\n{{ JSON.stringify($json.news) }}",
+        "hasOutputParser": true,
+        "options": { "systemMessage": "You are a competitive-intelligence analyst. Summarize what appears to have changed for this competitor in 1-3 sentences. Tag it and rate business impact. Be conservative - if the change looks cosmetic or you cannot tell, rate impact Low." }
+      },
+      "id": "ci-agent-01",
+      "name": "AI Agent: Summarize Change",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 1.7,
+      "position": [460, -40]
+    },
+    { "parameters": { "model": "gpt-4o-mini", "options": { "temperature": 0.2 } }, "id": "ci-model-01", "name": "OpenAI", "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi", "typeVersion": 1, "position": [420, 160] },
+    { "parameters": { "schemaType": "manual", "inputSchema": "{\"type\":\"object\",\"properties\":{\"summary\":{\"type\":\"string\"},\"category\":{\"type\":\"string\",\"enum\":[\"Pricing\",\"Product\",\"Hiring\",\"Funding\",\"Messaging\",\"Other\"]},\"impact\":{\"type\":\"string\",\"enum\":[\"Low\",\"Medium\",\"High\"]}},\"required\":[\"summary\",\"category\",\"impact\"]}" }, "id": "ci-parser-01", "name": "Structured Output", "type": "@n8n/n8n-nodes-langchain.outputParserStructured", "typeVersion": 1.2, "position": [560, 160] },
+    { "parameters": { "operation": "append", "documentId": { "value": "={{ $env.STATE_SHEET_ID }}", "mode": "id" }, "sheetName": { "value": "changelog", "mode": "list" }, "columns": { "mappingMode": "defineBelow", "value": { "competitor": "={{ $('Detect Change').item.json.competitor }}", "category": "={{ $json.output.category }}", "impact": "={{ $json.output.impact }}", "summary": "={{ $json.output.summary }}", "detected_at": "={{ $now.toISO() }}" } } }, "id": "ci-log-01", "name": "Append Changelog", "type": "n8n-nodes-base.googleSheets", "typeVersion": 4.5, "position": [680, -40] },
+    { "parameters": { "fieldsToAggregate": { "fieldToAggregate": [{ "fieldToAggregate": "competitor" }, { "fieldToAggregate": "output" }] }, "options": {} }, "id": "ci-agg-01", "name": "Aggregate Findings", "type": "n8n-nodes-base.aggregate", "typeVersion": 1, "position": [900, -40] },
+    {
+      "parameters": {
+        "sendTo": "={{ $env.DIGEST_RECIPIENTS }}",
+        "subject": "=Competitor Intel Digest - {{ $now.toFormat('dd LLL yyyy') }}",
+        "emailType": "html",
+        "message": "={{ $json.competitor.map((c, i) => ({ c, o: $json.output[i] })).sort((a, b) => ({High:0,Medium:1,Low:2}[a.o.impact] - {High:0,Medium:1,Low:2}[b.o.impact])).map(x => `<h3>${x.c} &mdash; <em>${x.o.category} / ${x.o.impact}</em></h3><p>${x.o.summary}</p>`).join('<hr>') || '<p>No competitor changes detected today.</p>' }}",
+        "options": {}
+      },
+      "id": "ci-email-01",
+      "name": "Send Digest Email",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [1120, -40]
+    }
+  ],
+  "connections": {
+    "Weekday Morning": { "main": [[{ "node": "Get Watchlist", "type": "main", "index": 0 }]] },
+    "Get Watchlist": { "main": [[{ "node": "HTTP: Fetch Page", "type": "main", "index": 0 }]] },
+    "HTTP: Fetch Page": { "main": [[{ "node": "HTTP: News Search", "type": "main", "index": 0 }]] },
+    "HTTP: News Search": { "main": [[{ "node": "Get Prior State", "type": "main", "index": 0 }]] },
+    "Get Prior State": { "main": [[{ "node": "Detect Change", "type": "main", "index": 0 }]] },
+    "Detect Change": { "main": [[{ "node": "Something Changed?", "type": "main", "index": 0 }, { "node": "Update Hashes", "type": "main", "index": 0 }]] },
+    "Something Changed?": { "main": [[{ "node": "AI Agent: Summarize Change", "type": "main", "index": 0 }], []] },
+    "OpenAI": { "ai_languageModel": [[{ "node": "AI Agent: Summarize Change", "type": "ai_languageModel", "index": 0 }]] },
+    "Structured Output": { "ai_outputParser": [[{ "node": "AI Agent: Summarize Change", "type": "ai_outputParser", "index": 0 }]] },
+    "AI Agent: Summarize Change": { "main": [[{ "node": "Append Changelog", "type": "main", "index": 0 }]] },
+    "Append Changelog": { "main": [[{ "node": "Aggregate Findings", "type": "main", "index": 0 }]] },
+    "Aggregate Findings": { "main": [[{ "node": "Send Digest Email", "type": "main", "index": 0 }]] }
+  },
+  "pinData": {},
+  "meta": { "templateCredsSetupCompleted": true }
+}

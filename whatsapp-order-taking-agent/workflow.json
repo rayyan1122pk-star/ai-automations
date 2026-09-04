@@ -1,0 +1,40 @@
+{
+  "nodes": [
+    { "parameters": { "updates": ["messages"] }, "id": "wo-trigger-01", "name": "WhatsApp Trigger", "type": "n8n-nodes-base.whatsAppTrigger", "typeVersion": 1, "position": [-640, 0] },
+    { "parameters": { "documentId": { "value": "={{ $env.CATALOG_SHEET_ID }}", "mode": "id" }, "sheetName": { "value": "catalog", "mode": "list" }, "options": {} }, "id": "wo-catalog-01", "name": "Get Catalog", "type": "n8n-nodes-base.googleSheets", "typeVersion": 4.5, "position": [-420, 0] },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $('WhatsApp Trigger').item.json.messages[0].text.body }}",
+        "hasOutputParser": true,
+        "options": { "systemMessage": "You are an order-taking assistant for a small shop. Only sell products returned by the catalog_lookup tool - never invent items, prices, or stock. Help the customer build an order, confirm quantities and delivery address, then output the final structured order. If an item is out of stock, offer the closest in-stock alternative from the catalog." }
+      },
+      "id": "wo-agent-01",
+      "name": "AI Agent: Order Assistant",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 1.7,
+      "position": [-180, 0]
+    },
+    { "parameters": { "model": "gpt-4o-mini", "options": { "temperature": 0.2 } }, "id": "wo-model-01", "name": "OpenAI", "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi", "typeVersion": 1, "position": [-260, 200] },
+    { "parameters": { "sessionIdType": "customKey", "sessionKey": "={{ $('WhatsApp Trigger').item.json.messages[0].from }}" }, "id": "wo-memory-01", "name": "Session Memory", "type": "@n8n/n8n-nodes-langchain.memoryBufferWindow", "typeVersion": 1.3, "position": [-140, 200] },
+    { "parameters": { "name": "catalog_lookup", "description": "Returns the current product catalog as JSON: sku, name, price, stock. Call this before quoting any price or availability.", "workflowId": { "value": "={{ $workflow.id }}", "mode": "id" } }, "id": "wo-tool-01", "name": "Catalog Lookup Tool", "type": "@n8n/n8n-nodes-langchain.toolWorkflow", "typeVersion": 2, "position": [-20, 200] },
+    { "parameters": { "schemaType": "manual", "inputSchema": "{\"type\":\"object\",\"properties\":{\"confirmed\":{\"type\":\"boolean\"},\"items\":{\"type\":\"array\",\"items\":{\"type\":\"object\",\"properties\":{\"sku\":{\"type\":\"string\"},\"name\":{\"type\":\"string\"},\"qty\":{\"type\":\"number\"},\"line_total\":{\"type\":\"number\"}}}},\"order_total\":{\"type\":\"number\"},\"delivery_address\":{\"type\":\"string\"},\"reply_to_customer\":{\"type\":\"string\"}},\"required\":[\"confirmed\",\"reply_to_customer\"]}" }, "id": "wo-parser-01", "name": "Structured Output", "type": "@n8n/n8n-nodes-langchain.outputParserStructured", "typeVersion": 1.2, "position": [100, 200] },
+    { "parameters": { "conditions": { "options": {}, "conditions": [{ "leftValue": "={{ $json.output.confirmed }}", "rightValue": true, "operator": { "type": "boolean", "operation": "true", "singleValue": true } }] } }, "id": "wo-if-01", "name": "Order Confirmed?", "type": "n8n-nodes-base.if", "typeVersion": 2.2, "position": [60, 0] },
+    { "parameters": { "operation": "append", "documentId": { "value": "={{ $env.ORDERS_SHEET_ID }}", "mode": "id" }, "sheetName": { "value": "orders", "mode": "list" }, "columns": { "mappingMode": "defineBelow", "value": { "phone": "={{ $('WhatsApp Trigger').item.json.messages[0].from }}", "items": "={{ JSON.stringify($json.output.items) }}", "total": "={{ $json.output.order_total }}", "address": "={{ $json.output.delivery_address }}", "created_at": "={{ $now.toISO() }}" } } }, "id": "wo-append-01", "name": "Append Order", "type": "n8n-nodes-base.googleSheets", "typeVersion": 4.5, "position": [300, -100] },
+    { "parameters": { "operation": "send", "phoneNumberId": "={{ $env.WHATSAPP_PHONE_NUMBER_ID }}", "recipientPhoneNumber": "={{ $('WhatsApp Trigger').item.json.messages[0].from }}", "textBody": "={{ $json.output.reply_to_customer }}" }, "id": "wo-send-01", "name": "Send WhatsApp Reply", "type": "n8n-nodes-base.whatsApp", "typeVersion": 1, "position": [520, 0] },
+    { "parameters": { "channel": "={{ $env.LOW_STOCK_SLACK_CHANNEL }}", "text": "=Low stock after order from {{ $('WhatsApp Trigger').item.json.messages[0].from }} - review catalog sheet." }, "id": "wo-slack-01", "name": "Notify Low Stock", "type": "n8n-nodes-base.slack", "typeVersion": 2.3, "position": [300, 100] }
+  ],
+  "connections": {
+    "WhatsApp Trigger": { "main": [[{ "node": "Get Catalog", "type": "main", "index": 0 }]] },
+    "Get Catalog": { "main": [[{ "node": "AI Agent: Order Assistant", "type": "main", "index": 0 }]] },
+    "OpenAI": { "ai_languageModel": [[{ "node": "AI Agent: Order Assistant", "type": "ai_languageModel", "index": 0 }]] },
+    "Session Memory": { "ai_memory": [[{ "node": "AI Agent: Order Assistant", "type": "ai_memory", "index": 0 }]] },
+    "Catalog Lookup Tool": { "ai_tool": [[{ "node": "AI Agent: Order Assistant", "type": "ai_tool", "index": 0 }]] },
+    "Structured Output": { "ai_outputParser": [[{ "node": "AI Agent: Order Assistant", "type": "ai_outputParser", "index": 0 }]] },
+    "AI Agent: Order Assistant": { "main": [[{ "node": "Order Confirmed?", "type": "main", "index": 0 }]] },
+    "Order Confirmed?": { "main": [[{ "node": "Append Order", "type": "main", "index": 0 }, { "node": "Notify Low Stock", "type": "main", "index": 0 }], [{ "node": "Send WhatsApp Reply", "type": "main", "index": 0 }]] },
+    "Append Order": { "main": [[{ "node": "Send WhatsApp Reply", "type": "main", "index": 0 }]] }
+  },
+  "pinData": {},
+  "meta": { "templateCredsSetupCompleted": true }
+}
